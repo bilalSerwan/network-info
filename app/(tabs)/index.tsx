@@ -1,10 +1,11 @@
 import * as ExpoNetwork from 'expo-network';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
 import ParallaxScrollView from '@/components/parallax-scroll-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { Collapsible } from '@/components/ui/collapsible';
 
 type ExpoNetworkState = {
   ipAddress?: string | null;
@@ -13,24 +14,57 @@ type ExpoNetworkState = {
   isInternetReachable?: boolean | null;
   networkState?: ExpoNetwork.NetworkState | null;
   networkType?: ExpoNetwork.NetworkStateType | null;
-  macAddress?: string | null;
-  dnsServers?: string[] | null;
+};
+
+type ExpoChangeEntry = {
+  id: string;
+  time: string;
+  summary: string;
+  state: ExpoNetwork.NetworkState;
+  signature: string;
 };
 
 export default function ExpoNetworkScreen() {
   const [state, setState] = useState<ExpoNetworkState>({});
+  const [changes, setChanges] = useState<ExpoChangeEntry[]>([]);
+  const lastSignatureRef = useRef<string | null>(null);
+  const seenSignaturesRef = useRef<Set<string>>(new Set());
+
+
+  const makeSignature = (s: ExpoNetwork.NetworkState) => {
+    const minimal = {
+      type: s.type,
+      isConnected: s.isConnected,
+      isInternetReachable: s.isInternetReachable,
+    };
+    return JSON.stringify(minimal);
+  };
+
+  const recordChange = (s: ExpoNetwork.NetworkState) => {
+    const signature = makeSignature(s);
+    if (signature === lastSignatureRef.current) return;
+    if (seenSignaturesRef.current.has(signature)) return;
+    lastSignatureRef.current = signature;
+    seenSignaturesRef.current.add(signature);
+    const entry: ExpoChangeEntry = {
+      id: `${Date.now()}`,
+      time: new Date().toLocaleTimeString(),
+      summary: `type=${s.type}`,
+      state: s,
+      signature,
+    };
+    setChanges((prev) => [...prev, entry]);
+  };
 
   useEffect(() => {
     let isMounted = true;
     const load = async () => {
       try {
-        const [ipAddress, isAirplaneModeEnabled, networkState, macAddress, dnsServers] = await Promise.all([
+        const [ipAddress, isAirplaneModeEnabled, networkState] = await Promise.all([
           ExpoNetwork.getIpAddressAsync(),
           ExpoNetwork.isAirplaneModeEnabledAsync(),
-          ExpoNetwork.getNetworkStateAsync(),
-          // Note: getMacAddressAsync may be limited on iOS and recent Android
-          ExpoNetwork.getMacAddressAsync?.(AsyncMacAddressIdentifier) ?? Promise.resolve(null),
-          ExpoNetwork.getDnsServersAsync?.() ?? Promise.resolve(null),
+          ExpoNetwork.getNetworkStateAsync()
+        
         ]);
 
         if (!isMounted) return;
@@ -40,10 +74,11 @@ export default function ExpoNetworkScreen() {
           isNetworkAvailable: networkState?.isConnected ?? null,
           isInternetReachable: networkState?.isInternetReachable ?? null,
           networkState,
-          networkType: networkState?.type ?? null,
-          macAddress: (macAddress as string) ?? null,
-          dnsServers: (dnsServers as string[]) ?? null,
+          networkType: networkState?.type ?? null
         });
+        if (networkState) {
+          recordChange(networkState);
+        }
       } catch (e) {
         if (!isMounted) return;
         setState({});
@@ -51,7 +86,6 @@ export default function ExpoNetworkScreen() {
     };
     load();
     const sub = ExpoNetwork.addNetworkStateListener?.((s) => {
-      console.log('expo-network -->', s);
       setState((prev) => ({
         ...prev,
         isNetworkAvailable: s.isConnected,
@@ -59,6 +93,7 @@ export default function ExpoNetworkScreen() {
         networkState: s,
         networkType: s.type,
       }));
+      recordChange(s);
     });
     return () => {
       isMounted = false;
@@ -78,8 +113,18 @@ export default function ExpoNetworkScreen() {
         <InfoRow label="type" value={String(state.networkType ?? 'unknown')} />
         <InfoRow label="ipAddress" value={String(state.ipAddress ?? '—')} />
         <InfoRow label="isAirplaneModeEnabled" value={String(state.isAirplaneModeEnabled ?? '—')} />
-        <InfoRow label="macAddress" value={String(state.macAddress ?? '—')} />
-        <InfoRow label="dnsServers" value={state.dnsServers?.join(', ') ?? '—'} />
+        <ThemedView style={styles.logHeader}>
+          <ThemedText type="subtitle">Change log</ThemedText>
+        </ThemedView>
+        {changes.length === 0 ? (
+          <ThemedText>No changes yet.</ThemedText>
+        ) : (
+          [...changes].reverse().map((entry) => (
+            <Collapsible key={entry.id} title={`${entry.time} — ${entry.summary}`}>
+              <ThemedText selectable>{JSON.stringify(entry.state, null, 2)}</ThemedText>
+            </Collapsible>
+          ))
+        )}
       </ScrollView>
     </ParallaxScrollView>
   );
@@ -106,6 +151,9 @@ const styles = StyleSheet.create({
   content: {
     gap: 10,
     paddingVertical: 8,
+  },
+  logHeader: {
+    marginTop: 8,
   },
   row: {
     flexDirection: 'row',
