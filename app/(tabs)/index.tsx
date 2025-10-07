@@ -1,98 +1,124 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import * as ExpoNetwork from 'expo-network';
+import { useEffect, useState } from 'react';
+import { ScrollView, StyleSheet, View } from 'react-native';
 
-import { HelloWave } from '@/components/hello-wave';
 import ParallaxScrollView from '@/components/parallax-scroll-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
 
-export default function HomeScreen() {
+type ExpoNetworkState = {
+  ipAddress?: string | null;
+  isAirplaneModeEnabled?: boolean | null;
+  isNetworkAvailable?: boolean | null;
+  isInternetReachable?: boolean | null;
+  networkState?: ExpoNetwork.NetworkState | null;
+  networkType?: ExpoNetwork.NetworkStateType | null;
+  macAddress?: string | null;
+  dnsServers?: string[] | null;
+};
+
+export default function ExpoNetworkScreen() {
+  const [state, setState] = useState<ExpoNetworkState>({});
+
+  useEffect(() => {
+    let isMounted = true;
+    const load = async () => {
+      try {
+        const [ipAddress, isAirplaneModeEnabled, networkState, macAddress, dnsServers] = await Promise.all([
+          ExpoNetwork.getIpAddressAsync(),
+          ExpoNetwork.isAirplaneModeEnabledAsync(),
+          ExpoNetwork.getNetworkStateAsync(),
+          // Note: getMacAddressAsync may be limited on iOS and recent Android
+          ExpoNetwork.getMacAddressAsync?.(AsyncMacAddressIdentifier) ?? Promise.resolve(null),
+          ExpoNetwork.getDnsServersAsync?.() ?? Promise.resolve(null),
+        ]);
+
+        if (!isMounted) return;
+        setState({
+          ipAddress,
+          isAirplaneModeEnabled,
+          isNetworkAvailable: networkState?.isConnected ?? null,
+          isInternetReachable: networkState?.isInternetReachable ?? null,
+          networkState,
+          networkType: networkState?.type ?? null,
+          macAddress: (macAddress as string) ?? null,
+          dnsServers: (dnsServers as string[]) ?? null,
+        });
+      } catch (e) {
+        if (!isMounted) return;
+        setState({});
+      }
+    };
+    load();
+    const sub = ExpoNetwork.addNetworkStateListener?.((s) => {
+      console.log('expo-network -->', s);
+      setState((prev) => ({
+        ...prev,
+        isNetworkAvailable: s.isConnected,
+        isInternetReachable: s.isInternetReachable ?? null,
+        networkState: s,
+        networkType: s.type,
+      }));
+    });
+    return () => {
+      isMounted = false;
+      sub?.remove?.();
+    };
+  }, []);
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
+    <ParallaxScrollView headerBackgroundColor={{ light: '#E6F7FF', dark: '#0F1C26' }} headerImage={<View />}>
+      <ThemedView style={styles.container}>
+        <ThemedText type="title">Expo Network</ThemedText>
+        <ThemedText style={styles.subtitle}>Snapshot and listener-based network info</ThemedText>
       </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
-
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
+      <ScrollView contentContainerStyle={styles.content}>
+        <InfoRow label="isNetworkAvailable" value={String(state.isNetworkAvailable ?? 'unknown')} />
+        <InfoRow label="isInternetReachable" value={String(state.isInternetReachable ?? 'unknown')} />
+        <InfoRow label="type" value={String(state.networkType ?? 'unknown')} />
+        <InfoRow label="ipAddress" value={String(state.ipAddress ?? '—')} />
+        <InfoRow label="isAirplaneModeEnabled" value={String(state.isAirplaneModeEnabled ?? '—')} />
+        <InfoRow label="macAddress" value={String(state.macAddress ?? '—')} />
+        <InfoRow label="dnsServers" value={state.dnsServers?.join(', ') ?? '—'} />
+      </ScrollView>
     </ParallaxScrollView>
   );
 }
 
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <ThemedView style={styles.row}>
+      <ThemedText style={styles.label}>{label}</ThemedText>
+      <ThemedText style={styles.value}>{value}</ThemedText>
+    </ThemedView>
+  );
+}
+
+const AsyncMacAddressIdentifier = '02:00:00:00:00:00';
+
 const styles = StyleSheet.create({
-  titleContainer: {
+  container: {
+    gap: 8,
+  },
+  subtitle: {
+    opacity: 0.7,
+  },
+  content: {
+    gap: 10,
+    paddingVertical: 8,
+  },
+  row: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 8,
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  label: {
+    fontWeight: '600',
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-  },
+  value: {},
 });
+
+
